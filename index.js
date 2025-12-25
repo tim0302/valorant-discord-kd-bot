@@ -163,8 +163,8 @@ async function getTeamKd(username, tag, matchData = null) {
       const headShots = p.stats.headshots;
       const totalShots = bodyShots + legShots + headShots;
 
-      const headShotRate = ((headShots * 100) / totalShots).toFixed(2);
-      const legShotRate = ((legShots * 100) / totalShots).toFixed(2);
+      const headShotRate = totalShots > 0 ? ((headShots * 100) / totalShots).toFixed(2) : 0;
+      const legShotRate = totalShots > 0 ? ((legShots * 100) / totalShots).toFixed(2) : 0;
 
       const evaluation = await generateCoachReview(
         kd,
@@ -174,6 +174,7 @@ async function getTeamKd(username, tag, matchData = null) {
         kills,
         deaths,
         assists,
+        p.character,
       );
 
       return {
@@ -199,28 +200,66 @@ async function getTeamKd(username, tag, matchData = null) {
   }
 }
 
-async function generateCoachReview(kd, headShotRate, legShots, totalShots, kills, deaths, assists) {
+
+// ========================
+// 导师配置
+// ========================
+
+const coaches = {
+  zozo: {
+    name: "Zozo",
+    systemPrompt: "你是Valorant导师zozo，风格是锐评，直接犀利，一针见血。",
+  },
+  xiaotian: {
+    name: "小天",
+    systemPrompt: "你是Valorant导师小天，说话请温柔一些但不要阴阳怪气，多多鼓励玩家。",
+  },
+  tracy: {
+    name: "Tracy",
+    systemPrompt: "你是Valorant导师tracy，鼓励但是不是完全鼓励，保持平衡的点评风格。",
+  },
+  steven: {
+    name: "Steven",
+    systemPrompt: "你是Valorant导师steven，句句不离资金，用资金相关的比喻来点评。",
+  },
+};
+
+function getRandomCoach() {
+  const coachKeys = Object.keys(coaches);
+  const randomKey = coachKeys[Math.floor(Math.random() * coachKeys.length)];
+  return coaches[randomKey];
+}
+
+async function generateCoachReview(kd, headShotRate, legShots, totalShots, kills, deaths, assists, character) {
+  // 随机选择一个导师
+  const coach = getRandomCoach();
+  
   const prompt = `
-你是一个幽默风趣但专业的Valorant导师-zozo。
+你是导师${coach.name}，请在点评开头来一句：
+"我是导师${coach.name}"
+
 根据以下玩家数据生成1-2句点评：
 
 爆头率: ${headShotRate}%
 击杀: ${kills}
 死亡: ${deaths}
 助攻: ${assists}
-
+腿部命中: ${legShots}
+爆头率在20%就很高了
+击杀/死亡在1.0以上就不错了 在2以上就很强了
 要求：短小精悍、幽默搞笑、带导师点评风格。
+附带${character}的角色特性进行点评
 `;
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "gpt-4.1",
       messages: [
-        { role: "system", content: "你是Valorant导师-zozo，写幽默点评。" },
+        { role: "system", content: coach.systemPrompt },
         { role: "user", content: prompt },
       ],
       temperature: 0.8,
-      max_tokens: 120,
+      max_tokens: 150,
     });
 
     return response.choices[0].message.content.trim();
@@ -272,12 +311,11 @@ async function checkLatestMatchAndReport() {
     markMatchAsProcessed(matchId);
     lastMatchId = matchId;
 
-    console.log(reports);
     const embeds = reports.map((p) => buildPlayerEmbed(p, gameMode));
 
     const channel = await client.channels.fetch(DISCORD_CHANNEL_ID);
     await channel.send({
-      content: "📢 zozo导师：检测到新比赛已结束",
+      content: "📢 金牌导师正在全力分析上局比赛",
       embeds,
     });
   } catch (err) {
@@ -303,7 +341,7 @@ function buildPlayerEmbed(teamReport, gameMode) {
       },
       { name: "🏆 金牌导师评价", value: teamReport.evaluation }
     )
-    .setFooter({ text: "Valorant 导师zozo · 名师评价" })
+    .setFooter({ text: "Valorant 金牌导师 · 名师评价" })
     .setTimestamp();
 }
 
