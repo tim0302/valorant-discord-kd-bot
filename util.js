@@ -22,10 +22,35 @@ export function isMatchProcessed(matchId) {
   return fs.existsSync(filePath);
 }
 
-export function markMatchAsProcessed(matchId) {
+export function markMatchAsProcessed(matchId, reports = null) {
   if (!matchId) return;
   const filePath = getMatchLogPath(matchId);
-  fs.writeFileSync(filePath, `Generated at ${new Date().toISOString()}\n`);
+  const timestamp = new Date().toISOString();
+  
+  let content = `Generated at ${timestamp}\n`;
+  
+  // Record key statistics for each player
+  if (reports && Array.isArray(reports)) {
+    content += `\n=== Match Statistics ===\n`;
+    reports.forEach((report) => {
+      content += `\nPlayer: ${report.name}\n`;
+      content += `K/D: ${report.kd}\n`;
+      content += `Kills: ${report.kills}\n`;
+      content += `Deaths: ${report.deaths}\n`;
+      content += `Assists: ${report.assists}\n`;
+      content += `KDA: ${report.kda}\n`;
+      content += `Headshot Rate: ${report.headShotRate}%\n`;
+      content += `Legshot Rate: ${report.legShotRate}%\n`;
+      content += `Total Shots: ${report.totalShots}\n`;
+      content += `Headshots: ${report.headShots || 0}\n`;
+      content += `Body Shots: ${report.bodyShots || 0}\n`;
+      content += `Legshots: ${report.legShots}\n`;
+      content += `Character: ${report.character}\n`;
+      content += `---\n`;
+    });
+  }
+  
+  fs.writeFileSync(filePath, content);
 }
 
 export async function fetchMatches(username, tag) {
@@ -159,5 +184,200 @@ export function buildPlayerEmbed(teamReport, gameMode) {
     )
     .setFooter({ text: "Valorant 金牌导师 · 名师评价" })
     .setTimestamp();
+}
+
+// ========================
+// Fortune Prediction
+// ========================
+
+// ========================
+// Statistics & Top Records
+// ========================
+
+export function getTodayLogFiles() {
+  const dir = path.resolve("./match_logs");
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+  
+  const files = fs.readdirSync(dir);
+  const todayFiles = files.filter(file => {
+    if (!file.endsWith('.txt')) return false;
+    
+    const filePath = path.join(dir, file);
+    const stats = fs.statSync(filePath);
+    const fileDate = new Date(stats.mtime).toISOString().split('T')[0];
+    
+    return fileDate === todayStr;
+  });
+
+  return todayFiles.map(file => path.join(dir, file));
+}
+
+export function parseLogFile(filePath) {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    
+    const stats = [];
+    let currentPlayer = null;
+    
+    for (const line of lines) {
+      if (line.startsWith('Player:')) {
+        if (currentPlayer) {
+          stats.push(currentPlayer);
+        }
+        currentPlayer = { name: line.replace('Player:', '').trim() };
+      } else if (line.startsWith('K/D:')) {
+        if (currentPlayer) {
+          currentPlayer.kd = parseFloat(line.replace('K/D:', '').trim());
+        }
+      } else if (line.startsWith('Kills:')) {
+        if (currentPlayer) {
+          currentPlayer.kills = parseInt(line.replace('Kills:', '').trim());
+        }
+      } else if (line.startsWith('Deaths:')) {
+        if (currentPlayer) {
+          currentPlayer.deaths = parseInt(line.replace('Deaths:', '').trim());
+        }
+      } else if (line.startsWith('Assists:')) {
+        if (currentPlayer) {
+          currentPlayer.assists = parseInt(line.replace('Assists:', '').trim());
+        }
+      } else if (line.startsWith('Headshot Rate:')) {
+        if (currentPlayer) {
+          currentPlayer.headShotRate = parseFloat(line.replace('Headshot Rate:', '').replace('%', '').trim());
+        }
+      } else if (line.startsWith('Legshot Rate:')) {
+        if (currentPlayer) {
+          currentPlayer.legShotRate = parseFloat(line.replace('Legshot Rate:', '').replace('%', '').trim());
+        }
+      } else if (line.startsWith('Total Shots:')) {
+        if (currentPlayer) {
+          currentPlayer.totalShots = parseInt(line.replace('Total Shots:', '').trim());
+        }
+      } else if (line.startsWith('Headshots:')) {
+        if (currentPlayer) {
+          currentPlayer.headshots = parseInt(line.replace('Headshots:', '').trim());
+        }
+      } else if (line.startsWith('Legshots:')) {
+        if (currentPlayer) {
+          currentPlayer.legshots = parseInt(line.replace('Legshots:', '').trim());
+        }
+      } else if (line.startsWith('Character:')) {
+        if (currentPlayer) {
+          currentPlayer.character = line.replace('Character:', '').trim();
+        }
+      }
+    }
+    
+    if (currentPlayer) {
+      stats.push(currentPlayer);
+    }
+    
+    return stats;
+  } catch (err) {
+    console.error(`Error parsing log file ${filePath}:`, err);
+    return [];
+  }
+}
+
+export function getTodayTopStats() {
+  const logFiles = getTodayLogFiles();
+  const allStats = [];
+  
+  // Parse all log files
+  for (const filePath of logFiles) {
+    const stats = parseLogFile(filePath);
+    allStats.push(...stats);
+  }
+  
+  if (allStats.length === 0) {
+    return null;
+  }
+  
+  // Find top records
+  const topStats = {
+    bestKD: null,
+    highestKills: null,
+    highestHeadshotRate: null,
+    highestAssists: null,
+    mostHeadshots: null,
+  };
+  
+  for (const stat of allStats) {
+    // Best K/D
+    if (!topStats.bestKD || stat.kd > topStats.bestKD.kd) {
+      topStats.bestKD = stat;
+    }
+    
+    // Highest Kills
+    if (!topStats.highestKills || stat.kills > topStats.highestKills.kills) {
+      topStats.highestKills = stat;
+    }
+    
+    // Highest Headshot Rate
+    if (!topStats.highestHeadshotRate || stat.headShotRate > topStats.highestHeadshotRate.headShotRate) {
+      topStats.highestHeadshotRate = stat;
+    }
+    
+    // Highest Assists
+    if (!topStats.highestAssists || stat.assists > topStats.highestAssists.assists) {
+      topStats.highestAssists = stat;
+    }
+    
+    // Most Headshots
+    if (!topStats.mostHeadshots || (stat.headshots || 0) > (topStats.mostHeadshots.headshots || 0)) {
+      topStats.mostHeadshots = stat;
+    }
+  }
+  
+  return topStats;
+}
+
+export async function generateFortune(userName) {
+  const today = new Date().toLocaleDateString('zh-CN', { 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric',
+    weekday: 'long'
+  });
+
+  const prompt = `
+为玩家 ${userName} 生成今日（${today}）的 Valorant 游戏运势预测。
+
+要求：
+1. 包含今日整体运势（大吉/中吉/小吉/平/小凶/中凶/大凶）
+2. 预测今日适合使用的特工（推荐2-3个）
+3. 预测今日游戏表现（K/D、爆头率等）
+4. 给出今日游戏建议和注意事项
+5. 风格要幽默风趣，带有玄学占卜的感觉
+6. 控制在150字以内，格式清晰易读
+
+请用中文生成，风格可以参考塔罗牌占卜或星座运势。
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1",
+      messages: [
+        { 
+          role: "system", 
+          content: "你是一个专业的Valorant游戏战术推荐师，擅长用幽默风趣的方式预测游戏运势，风格类似塔罗牌占卜。" 
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.9,
+      max_tokens: 200,
+    });
+
+    return response.choices[0].message.content.trim();
+  } catch (err) {
+    console.error("生成运势失败:", err);
+    return "运势生成失败，请稍后再试";
+  }
 }
 

@@ -15,6 +15,8 @@ import {
   markMatchAsProcessed,
   generateCoachReview,
   buildPlayerEmbed,
+  generateFortune,
+  getTodayTopStats,
 } from "./util.js";
 
 // ========================
@@ -37,6 +39,103 @@ const client = new Client({
 client.once("clientReady", () => {
   console.log(`Logged in as ${client.user.tag}`);
   setInterval(checkLatestMatchAndReport, 60 * 1000 * 1);
+});
+
+// ========================
+// Message Commands
+// ========================
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  // Handle !predict command
+  if (message.content.startsWith("!predict")) {
+    try {
+      const args = message.content.trim().split(/\s+/);
+      const userName = args.slice(1).join(" ");
+
+      // Send loading message
+      const loadingMsg = await message.reply("🔮 正在为 " + userName + " 计算今日战术...");
+
+      // Generate fortune
+      const fortune = await generateFortune(userName);
+
+      // Create embed
+      const embed = new EmbedBuilder()
+        .setTitle(`🔮 ${userName} 的今日 Valorant 推荐战术`)
+        .setDescription(fortune)
+        .setColor(0x9b59b6) // Purple color for fortune
+        .setFooter({ text: "Valorant 名师战术策划 · 仅供参考" })
+        .setTimestamp();
+
+      // Edit the loading message with the result
+      await loadingMsg.edit({ content: "", embeds: [embed] });
+    } catch (err) {
+      console.error("预测功能错误:", err);
+      await message.reply("❌ 运势生成失败，请稍后再试");
+    }
+  }
+
+  // Handle !top command
+  if (message.content.startsWith("!top")) {
+    try {
+      const topStats = getTodayTopStats();
+      
+      if (!topStats) {
+        await message.reply("📊 今日还没有比赛记录，快去打几局吧！");
+        return;
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle("🏆 今日最佳数据")
+        .setDescription("今日所有比赛中的最高记录")
+        .setColor(0xffd700) // Gold color
+        .addFields(
+          {
+            name: "🥇 最佳 K/D",
+            value: topStats.bestKD 
+              ? `**${topStats.bestKD.name}**\nK/D: ${topStats.bestKD.kd}\nKDA: ${topStats.bestKD.kills}/${topStats.bestKD.deaths}/${topStats.bestKD.assists}`
+              : "暂无数据",
+            inline: true,
+          },
+          {
+            name: "💀 最高击杀",
+            value: topStats.highestKills
+              ? `**${topStats.highestKills.name}**\n${topStats.highestKills.kills} 击杀`
+              : "暂无数据",
+            inline: true,
+          },
+          {
+            name: "🎯 最高爆头率",
+            value: topStats.highestHeadshotRate
+              ? `**${topStats.highestHeadshotRate.name}**\n${topStats.highestHeadshotRate.headShotRate}%`
+              : "暂无数据",
+            inline: true,
+          },
+          {
+            name: "🤝 最高助攻",
+            value: topStats.highestAssists
+              ? `**${topStats.highestAssists.name}**\n${topStats.highestAssists.assists} 助攻`
+              : "暂无数据",
+            inline: true,
+          },
+          {
+            name: "💥 最多爆头",
+            value: topStats.mostHeadshots
+              ? `**${topStats.mostHeadshots.name}**\n${topStats.mostHeadshots.headshots || 0} 次爆头`
+              : "暂无数据",
+            inline: true,
+          }
+        )
+        .setFooter({ text: "Valorant 今日最佳 · 数据统计" })
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    } catch (err) {
+      console.error("获取今日最佳数据失败:", err);
+      await message.reply("❌ 获取数据失败，请稍后再试");
+    }
+  }
 });
 
 // ========================
@@ -101,9 +200,11 @@ async function getTeamKd(username, tag, matchData = null) {
         kd,
         kills,
         deaths,
+        assists,
         evaluation,
         legShots,
         totalShots,
+        headShots,
         headShotRate,
         legShotRate,
         kda,
@@ -157,7 +258,7 @@ async function checkLatestMatchAndReport() {
     }
 
     // Mark as processed before sending to avoid race conditions
-    markMatchAsProcessed(matchId);
+    markMatchAsProcessed(matchId, reports);
     lastMatchId = matchId;
 
     const embeds = reports.map((p) => buildPlayerEmbed(p, gameMode));
